@@ -19,14 +19,17 @@
     "dist"
   ],
   "scripts": {
-    "test": "npm run build && node test/test.cjs",
     "build": "npm run build:mjs && npm run build:cjs",
     "build:mjs": "tsc -p tsconfig.json",
-    "build:cjs": "tsc -p tsconfig.cjs.json && echo {\"type\":\"commonjs\"} > dist/cjs/package.json"
+    "build:cjs": "tsc -p tsconfig.cjs.json && echo {\"type\":\"commonjs\"} > dist/cjs/package.json",
+    "test": "npm run test:all",
+    "test:cjs": "node --loader ts-node/esm test/test.ts cjs",
+    "test:mjs": "node --loader ts-node/esm test/test.ts mjs",
+    "test:all": "npm run build && npm run test:cjs && npm run test:mjs"
   },
-  "dependencies": {},
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.0.0"
   },
   "repository": {
