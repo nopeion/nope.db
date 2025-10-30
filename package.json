@@ -1,0 +1,47 @@
+{
+  "name": "nope.db",
+  "author": "nopeion",
+  "version": "1.0.0",
+  "license": "MIT",
+  "description": "A modern, simple, and async JSON database for Node.js with zero dependencies and a data-safe queue.",
+  "type": "module",
+  "main": "./dist/cjs/app.js",
+  "module": "./dist/mjs/app.js",
+  "types": "./dist/mjs/app.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/mjs/app.js",
+      "require": "./dist/cjs/app.js",
+      "types": "./dist/mjs/app.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "test": "npm run build && node test/test.cjs",
+    "build": "npm run build:mjs && npm run build:cjs",
+    "build:mjs": "tsc -p tsconfig.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json && echo {\"type\":\"commonjs\"} > dist/cjs/package.json"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nopeion/nope.db"
+  },
+  "keywords": [
+    "fs",
+    "file system",
+    "json",
+    "json-database",
+    "db",
+    "database",
+    "async",
+    "quick.db",
+    "enmap"
+  ]
+}
