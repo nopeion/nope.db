@@ -1,9 +1,6 @@
 import { StorageManager, ClearOptions } from "./utils.js";
 import { DatabaseError } from "./error.js";
-import { existsSync, writeFileSync } from "fs";
 import * as pathUtils from "path";
-
-const PUNCTUATION_REGEX = new RegExp(/^[!"#%&'*,./?@^_|~-]$/);
 
 export interface NopeDbSettings {
     path?: string;
@@ -42,8 +39,8 @@ export class NopeDB {
             throw new DatabaseError("The 'spaces' setting must be a positive number.");
         if (typeof separator !== 'string')
             throw new DatabaseError("The 'separator' setting must be a string.");
-        if (!PUNCTUATION_REGEX.test(separator))
-            throw new DatabaseError("Invalid 'separator'. Must be a single punctuation character.");
+        if (separator.length !== 1)
+            throw new DatabaseError("Invalid 'separator'. Must be a single character.");
 
         this.settings = {
             path: path,
@@ -57,10 +54,6 @@ export class NopeDB {
             spaces: this.settings.spaces,
             separator: this.settings.separator,
         });
-
-        if (!existsSync(this.settings.file)) {
-            writeFileSync(this.settings.file, "{}");
-        }
     }
 
     /**

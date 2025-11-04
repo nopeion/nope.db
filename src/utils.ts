@@ -32,6 +32,18 @@ export class StorageManager {
         this.spaces = settings.spaces;
         this.separator = settings.separator;
         this.queue = Promise.resolve();
+
+        this._enqueue(async () => {
+            try {
+                await fs.access(this.file);
+            } catch (error: any) {
+                if (error?.code === 'ENOENT') {
+                    await this._write({});
+                    return;
+                }
+                throw new DatabaseError(`Unable to access database file: ${error?.message ?? error}`);
+            }
+        });
     }
 
     private _enqueue<T>(task: () => Promise<T>): Promise<T> {
@@ -49,7 +61,10 @@ export class StorageManager {
                 await this._write({});
                 return {};
             }
-            throw new DatabaseError(this.errors.parseError);
+            if (error instanceof SyntaxError) {
+                throw new DatabaseError(this.errors.parseError);
+            }
+            throw new DatabaseError(`Unable to read database file: ${error?.message ?? error}`);
         }
     }
 

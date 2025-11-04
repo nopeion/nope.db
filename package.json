@@ -23,9 +23,9 @@
     "build:mjs": "tsc -p tsconfig.json",
     "build:cjs": "tsc -p tsconfig.cjs.json && echo {\"type\":\"commonjs\"} > dist/cjs/package.json",
     "test": "npm run test:all",
-    "test:cjs": "node --loader ts-node/esm test/test.ts cjs",
-    "test:mjs": "node --loader ts-node/esm test/test.ts mjs",
-    "test:all": "npm run build && npm run test:cjs && npm run test:mjs"
+    "test:cjs": "npm run test:all",
+    "test:mjs": "npm run test:all",
+    "test:all": "npm run build && node --loader ts-node/esm --test test/test.ts"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

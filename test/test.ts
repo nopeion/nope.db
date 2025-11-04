@@ -1,238 +1,209 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const importType = process.argv[2] || 'mjs';
-
-console.log(`Running tests for ${importType.toUpperCase()} build...`);
-
-// Dynamically import the correct build (CJS or MJS)
-// We use 'any' as the type because we are dynamically importing.
-let NopeDB: any;
-if (importType === 'cjs') {
-    NopeDB = (await import('../dist/cjs/app.js')).NopeDB;
-} else {
-    NopeDB = (await import('../dist/mjs/app.js')).NopeDB;
+interface NopeDbModule {
+    NopeDB: new (settings?: { path?: string; separator?: string; spaces?: number }) => {
+        set(id: string, value: unknown): Promise<unknown>;
+        get(id: string): Promise<unknown>;
+        add(id: string, value: number): Promise<number>;
+        subtract(id: string, value: number): Promise<number>;
+        has(id: string): Promise<boolean>;
+        push(id: string, value: unknown): Promise<unknown[]>;
+        delete(id: string): Promise<boolean>;
+        all(): Promise<Record<string, unknown>>;
+        clear(options: { confirm: boolean }): Promise<true>;
+        backup(filePath: string): Promise<true>;
+        loadBackup(filePath: string): Promise<true>;
+    };
 }
 
-// Define __dirname manually in ESM
+const builds: { name: string; loader: () => Promise<NopeDbModule> }[] = [
+    {
+        name: 'MJS build',
+        loader: () => import(new URL('../dist/mjs/app.js', import.meta.url).href) as Promise<NopeDbModule>,
+    },
+    {
+        name: 'CJS build',
+        loader: () => import(new URL('../dist/cjs/app.js', import.meta.url).href) as Promise<NopeDbModule>,
+    }
+];
+
 const __filename: string = fileURLToPath(import.meta.url);
 const __dirname: string = path.dirname(__filename);
 
-// Define paths for the test database and backup file
 const TEST_DB_PATH: string = path.join(__dirname, 'test-db.json');
 const BACKUP_PATH: string = path.join(__dirname, 'test-db-backup.json');
 
-const tests: { name: string, fn: () => Promise<void> }[] = [];
-let failedTests: { name: string, error: Error }[] = [];
-
-/**
- * Asserts a condition. Throws an error if the condition is false.
- * @param {boolean} condition The condition to check.
- * @param {string} message The error message if assertion fails.
- */
-async function assert(condition: boolean, message: string): Promise<void> {
-    if (!condition) {
-        throw new Error(`Assertion failed: ${message}`);
-    }
-}
-
-/**
- * Adds a test to the queue.
- * @param {string} name The name of the test.
- * @param {Function} fn The async test function to execute.
- */
-function test(name: string, fn: () => Promise<void>): void {
-    tests.push({ name, fn });
-}
-
-/**
- * Runs all queued tests and provides a summary.
- */
-async function runAllTests() {
-    for (const t of tests) {
-        try {
-            await t.fn();
-            console.log(`  [PASS] ${t.name}`);
-        } catch (error) {
-            failedTests.push({ name: t.name, error: error as Error });
-            console.log(`  [FAIL] ${t.name}`);
-        }
-    }
-
-    console.log("\n--------------------\n");
-
-    if (failedTests.length === 0) {
-        console.log(`All ${tests.length} tests passed successfully!`);
-    } else {
-        console.error(`${failedTests.length} of ${tests.length} tests failed.\n`);
-        for (const failure of failedTests) {
-            console.error(`[FAILED] ${failure.name}`);
-            console.error(failure.error);
-            console.error(""); // Add a newline for readability
-        }
-        process.exit(1); // Exit with a failure code
-    }
-}
-
-/**
- * Deletes any leftover test files (DB and backup).
- */
 async function cleanup(): Promise<void> {
-    if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
-    if (fs.existsSync(BACKUP_PATH)) fs.unlinkSync(BACKUP_PATH);
+    await Promise.all([
+        fs.rm(TEST_DB_PATH, { force: true }),
+        fs.rm(BACKUP_PATH, { force: true })
+    ]);
 }
 
-/**
- * Main test runner. Executes all tests in sequence.
- */
-(async () => {
-    console.log("Starting nope.db tests...\n");
-    await cleanup(); // Clean up old files before starting
+async function fileExists(filePath: string): Promise<boolean> {
+    try {
+        await fs.access(filePath);
+        return true;
+    } catch {
+        return false;
+    }
+}
 
-    const db = new NopeDB({
-        path: TEST_DB_PATH,
-        separator: '_' // Set separator to '_' for nested tests
-    });
+for (const build of builds) {
+    test(`${build.name}`, { concurrency: false }, async (t) => {
+        await cleanup();
 
-    test("set() & get()", async () => {
-        await db.set('user_profile_name', 'nopeion');
-        const name = await db.get('user_profile_name');
-        await assert(name === 'nopeion', `Expected 'nopeion', got '${name}'`);
-    });
+        const module = await build.loader();
+        const NopeDB = module.NopeDB;
+        let db: ReturnType<typeof createDb>;
 
-    test("set() complex object", async () => {
-        const user = { id: 1, type: 'admin', settings: { theme: 'dark' } };
-        await db.set('user_1', user);
-        const fetchedUser = await db.get('user_1');
-        await assert(fetchedUser.id === 1, "User ID mismatch");
-        await assert(fetchedUser.settings.theme === 'dark', "User theme mismatch");
-    });
+        function createDb() {
+            return new NopeDB({ path: TEST_DB_PATH, separator: '_' });
+        }
 
-    test("get() nested value", async () => {
-        const theme = await db.get('user_1_settings_theme');
-        await assert(theme === 'dark', `Expected 'dark', got '${theme}'`);
-    });
+        t.beforeEach(async () => {
+            await cleanup();
+            db = createDb();
+            await db.all();
+        });
 
-    test("add()", async () => {
-        await db.set('counter', 10);
-        const newCount = await db.add('counter', 5);
-        await assert(newCount === 15, `Expected 15, got '${newCount}'`);
-        const newCount2 = await db.add('new_counter', 1);
-        await assert(newCount2 === 1, `Expected 1, got '${newCount2}'`);
-    });
+        t.afterEach(async () => {
+            await cleanup();
+        });
 
-    test("subtract()", async () => {
-        const newCount = await db.subtract('counter', 3);
-        await assert(newCount === 12, `Expected 12, got '${newCount}'`);
-    });
+        t.after(async () => {
+            await cleanup();
+        });
 
-    test("has()", async () => {
-        const hasUser = await db.has('user_1');
-        await assert(hasUser === true, "Expected 'user_1' to exist");
-        const hasFake = await db.has('fake_key');
-        await assert(hasFake === false, "Expected 'fake_key' to not exist");
-    });
+        await t.test('set() & get()', async () => {
+            await db.set('user_profile_name', 'nopeion');
+            const name = await db.get('user_profile_name');
+            assert.equal(name, 'nopeion');
+        });
 
-    test("push()", async () => {
-        await db.set('items', ['a', 'b']);
-        const newItems = await db.push('items', 'c');
-        await assert(newItems.length === 3 && newItems[2] === 'c', "Push failed");
-        const newItems2 = await db.push('new_items', 'x');
-        await assert(newItems2.length === 1 && newItems2[0] === 'x', "Push to new array failed");
-    });
+        await t.test('set() complex object', async () => {
+            const user = { id: 1, type: 'admin', settings: { theme: 'dark' } };
+            await db.set('user_1', user);
+            const fetchedUser = await db.get('user_1');
+            assert.deepEqual(fetchedUser, user);
+        });
 
-    test("delete()", async () => {
-        await db.delete('user_profile_name');
-        const name = await db.get('user_profile_name');
-        await assert(name === null, "Key should be deleted and return null");
-    });
+        await t.test('get() nested value', async () => {
+            await db.set('user_1', { settings: { theme: 'dark' } });
+            const theme = await db.get('user_1_settings_theme');
+            assert.equal(theme, 'dark');
+        });
 
-    test("all()", async () => {
-        const allData: any = await db.all(); // Use 'any' to bypass strict type checks for this test
-        await assert(typeof allData === 'object' && !Array.isArray(allData), "all() should return an object");
-        await assert(allData.counter === 12, "all() data is incorrect");
-        await assert(allData.user['1'].id === 1, "all() nested data is incorrect");
-    });
+        await t.test('add()', async () => {
+            await db.set('counter', 10);
+            const newCount = await db.add('counter', 5);
+            assert.equal(newCount, 15);
 
-    test("clear()", async () => {
-        await db.clear({ confirm: true });
-        const allData = await db.all();
-        await assert(Object.keys(allData).length === 0, "Database should be empty after clear()");
-    });
+            const newCount2 = await db.add('new_counter', 1);
+            assert.equal(newCount2, 1);
+        });
 
-    test("backup() and restore", async () => {
-        // Set some data to back up
-        await db.set('key1', 'value1');
-        await db.set('key2', { nested: true });
+        await t.test('subtract()', async () => {
+            await db.set('counter', 10);
+            const newCount = await db.subtract('counter', 3);
+            assert.equal(newCount, 7);
+        });
 
-        // Create backup
-        await db.backup(BACKUP_PATH);
-        await assert(fs.existsSync(BACKUP_PATH), "Backup file was not created");
+        await t.test('has()', async () => {
+            await db.set('user_1', { id: 1 });
+            assert.equal(await db.has('user_1'), true);
+            assert.equal(await db.has('fake_key'), false);
+        });
 
-        // Clear the database
-        await db.clear({ confirm: true });
-        let data = await db.all();
-        await assert(Object.keys(data).length === 0, "DB should be empty before restore");
+        await t.test('push()', async () => {
+            await db.set('items', ['a', 'b']);
+            const newItems = await db.push('items', 'c');
+            assert.deepEqual(newItems, ['a', 'b', 'c']);
 
-        // Restore from backup
-        // Pass the same separator to the new instance for consistent testing
-        const newDb = new NopeDB({ path: TEST_DB_PATH, separator: '_' });
-        await newDb.loadBackup(BACKUP_PATH);
+            const newItems2 = await db.push('new_items', 'x');
+            assert.deepEqual(newItems2, ['x']);
+        });
 
-        // Verify restored data
-        const val1 = await newDb.get('key1');
-        const val2 = await newDb.get('key2_nested'); // This now works because newDb separator is '_'
-        await assert(val1 === 'value1', "Restored value for key1 is incorrect");
-        await assert(val2 === true, "Restored value for key2.nested is incorrect");
-    });
+        await t.test('delete()', async () => {
+            await db.set('user_profile_name', 'nopeion');
+            const deleted = await db.delete('user_profile_name');
+            assert.equal(deleted, true);
+            const value = await db.get('user_profile_name');
+            assert.equal(value, null);
+        });
 
-    test("Concurrent writes (Queue)", async () => {
-        const promises = [
-            db.set('concurrent_1', 1),
-            db.set('concurrent_2', 2),
-            db.add('concurrent_counter', 1),
-            db.push('concurrent_array', 'a'),
-            db.set('concurrent_3', 3)
-        ];
-        await Promise.all(promises);
+        await t.test('all()', async () => {
+            await db.set('counter', 12);
+            await db.set('user_1', { id: 1, settings: { theme: 'dark' } });
+            const allData = await db.all();
+            assert.equal(typeof allData, 'object');
+            assert.equal((allData as any).counter, 12);
+            assert.equal(((allData as any).user as any)['1'].settings.theme, 'dark');
+        });
 
-        await assert(await db.get('concurrent_1') === 1, "Concurrent write 1 failed");
-        await assert(await db.get('concurrent_2') === 2, "Concurrent write 2 failed");
-        await assert(await db.get('concurrent_counter') === 1, "Concurrent add failed");
-        const arr: any = await db.get('concurrent_array'); // Use 'any' to bypass strict type checks for this test
-        await assert(Array.isArray(arr) && arr[0] === 'a', "Concurrent push failed");
-    });
+        await t.test('clear()', async () => {
+            await db.set('to_clear', 'value');
+            await db.clear({ confirm: true });
+            const allData = await db.all();
+            assert.equal(Object.keys(allData).length, 0);
+        });
 
-    test("add() with non-numeric value", async () => {
-        await db.set('non_numeric', 'hello');
-        try {
-            await db.add('non_numeric', 5);
-            await assert(false, "Should have thrown an error for non-numeric add");
-        } catch (error) {
-            await assert(error instanceof Error, "Did not throw a proper error");
+        await t.test('backup() and restore', async () => {
+            await db.set('key1', 'value1');
+            await db.set('key2', { nested: true });
+
+            await db.backup(BACKUP_PATH);
+            assert.equal(await fileExists(BACKUP_PATH), true);
+
+            await db.clear({ confirm: true });
+            const allData = await db.all();
+            assert.equal(Object.keys(allData).length, 0);
+
+            const restoreDb = createDb();
+            await restoreDb.loadBackup(BACKUP_PATH);
+
+            const val1 = await restoreDb.get('key1');
+            const val2 = await restoreDb.get('key2_nested');
+            assert.equal(val1, 'value1');
+            assert.equal(val2, true);
+        });
+
+        await t.test('Concurrent writes (Queue)', async () => {
+            await Promise.all([
+                db.set('concurrent_1', 1),
+                db.set('concurrent_2', 2),
+                db.add('concurrent_counter', 1),
+                db.push('concurrent_array', 'a'),
+                db.set('concurrent_3', 3)
+            ]);
+
+            assert.equal(await db.get('concurrent_1'), 1);
+            assert.equal(await db.get('concurrent_2'), 2);
+            assert.equal(await db.get('concurrent_counter'), 1);
+            const arr = await db.get('concurrent_array');
+            assert.ok(Array.isArray(arr));
+            assert.equal((arr as unknown[])[0], 'a');
+        });
+
+        await t.test('add() with non-numeric value', async () => {
+            await db.set('non_numeric', 'hello');
+            await assert.rejects(async () => db.add('non_numeric', 5), {
+                name: 'nopedb',
+            });
             const value = await db.get('non_numeric');
-            await assert(value === 'hello', "Value should not have been modified");
-        }
+            assert.equal(value, 'hello');
+        });
+
+        await t.test('Corrupted JSON file', async () => {
+            await fs.writeFile(TEST_DB_PATH, '{"key": "value",');
+            const corruptDb = createDb();
+            await assert.rejects(async () => corruptDb.get('any'), {
+                message: 'Failed to parse database file. Check for corrupt JSON.',
+            });
+        });
     });
-
-    test("Corrupted JSON file", async () => {
-        // Manually corrupt the file
-        fs.writeFileSync(TEST_DB_PATH, '{"key": "value",');
-
-        try {
-            // Re-instantiate to force a read from the corrupted file
-            const corruptDb = new NopeDB({ path: TEST_DB_PATH });
-            await corruptDb.get('any'); // Trigger a read
-            await assert(false, "Should have thrown an error on read from corrupted file");
-        } catch (error) {
-            await assert(error instanceof Error, "Did not throw on corrupted file");
-        }
-    });
-
-    // Run all the defined tests
-    await runAllTests();
-
-    // Final cleanup
-    await cleanup();
-})();
+}
