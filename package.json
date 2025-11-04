@@ -1,7 +1,7 @@
 {
   "name": "nope.db",
   "author": "nopeion",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "license": "MIT",
   "description": "A modern, simple, and async JSON database for Node.js with zero dependencies and a data-safe queue.",
   "type": "module",
