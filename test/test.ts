@@ -119,6 +119,14 @@ for (const build of builds) {
             assert.equal(await db.has('fake_key'), false);
         });
 
+        await t.test('null values are stored values', async () => {
+            await db.set('nullable', null);
+            assert.equal(await db.get('nullable'), null);
+            assert.equal(await db.has('nullable'), true);
+            assert.equal(await db.get('missing_nullable'), null);
+            assert.equal(await db.has('missing_nullable'), false);
+        });
+
         await t.test('push()', async () => {
             await db.set('items', ['a', 'b']);
             const newItems = await db.push('items', 'c');
@@ -196,6 +204,26 @@ for (const build of builds) {
             });
             const value = await db.get('non_numeric');
             assert.equal(value, 'hello');
+        });
+
+        await t.test('invalid path segments are rejected consistently', async () => {
+            for (const invalidId of ['_bad', 'bad_', 'bad__id', 'safe___bad']) {
+                await assert.rejects(async () => db.get(invalidId), { name: 'nopedb' });
+                await assert.rejects(async () => db.delete(invalidId), { name: 'nopedb' });
+            }
+        });
+
+        await t.test('unsafe prototype path segments are rejected', async () => {
+            const dotDb = new NopeDB({ path: TEST_DB_PATH });
+            await dotDb.all();
+
+            for (const unsafeId of ['__proto__.polluted', 'constructor.polluted', 'prototype.polluted']) {
+                await assert.rejects(async () => dotDb.set(unsafeId, true), { name: 'nopedb' });
+                await assert.rejects(async () => dotDb.get(unsafeId), { name: 'nopedb' });
+                await assert.rejects(async () => dotDb.delete(unsafeId), { name: 'nopedb' });
+            }
+
+            assert.equal(({} as Record<string, unknown>).polluted, undefined);
         });
 
         await t.test('Corrupted JSON file', async () => {

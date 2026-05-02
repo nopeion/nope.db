@@ -1,4 +1,5 @@
 import fs from "fs/promises";
+import path from "path";
 import { DatabaseError } from "./error.js";
 
 export interface ClearOptions {
@@ -11,6 +12,11 @@ interface StorageManagerSettings {
     separator: string;
 }
 
+interface FindResult {
+    exists: boolean;
+    value: any;
+}
+
 export class StorageManager {
     private file: string;
     private spaces: number;
@@ -20,7 +26,7 @@ export class StorageManager {
         dataNotANumber: "Existing data for this ID is not of type 'number'.",
         mustBeANumber: "The provided value must be of type 'number'.",
         mustBeArray: "The existing data must be of type 'array'.",
-        nonValidID: "Invalid ID. It cannot be empty, start/end with a separator, or contain repeated separators.",
+        nonValidID: "Invalid ID. It cannot be empty, start/end with a separator, contain repeated separators, or use unsafe path segments.",
         undefinedID: "ID is undefined.",
         undefinedValue: "Value is undefined.",
         parseError: "Failed to parse database file. Check for corrupt JSON.",
@@ -69,34 +75,50 @@ export class StorageManager {
     }
 
     private async _write(data: any): Promise<void> {
-        await fs.writeFile(this.file, JSON.stringify(data, null, this.spaces));
+        const dir = path.dirname(this.file);
+        const base = path.basename(this.file);
+        const suffix = `${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+        const tempFile = path.join(dir, `.${base}.${suffix}.tmp`);
+        try {
+            await fs.writeFile(tempFile, JSON.stringify(data, null, this.spaces));
+            await fs.rename(tempFile, this.file);
+        } catch (error) {
+            await fs.rm(tempFile, { force: true });
+            throw error;
+        }
     }
 
-    private _validateID(id: string): void {
+    private _parsePath(id: string): string[] {
         if (typeof id !== 'string' || !id ||
             id.startsWith(this.separator) ||
             id.endsWith(this.separator) ||
             id.includes(this.separator + this.separator)) {
             throw new DatabaseError(this.errors.nonValidID);
         }
+        const parts = id.split(this.separator);
+        if (parts.some((part) => part === '__proto__' || part === 'constructor' || part === 'prototype')) {
+            throw new DatabaseError(this.errors.nonValidID);
+        }
+        return parts;
     }
 
-    private _find(data: any, id: string): any {
-        this._validateID(id);
-        const parts = id.split(this.separator);
+    private _find(data: any, id: string): FindResult {
+        const parts = this._parsePath(id);
         let current = data;
         for (const part of parts) {
             if (typeof current !== 'object' || current === null) {
-                return null;
+                return { exists: false, value: null };
+            }
+            if (!Object.prototype.hasOwnProperty.call(current, part)) {
+                return { exists: false, value: null };
             }
             current = current[part];
         }
-        return current ?? null;
+        return { exists: true, value: current };
     }
 
     private _findAndSet(data: any, id: string, value: any): any {
-        this._validateID(id);
-        const parts = id.split(this.separator);
+        const parts = this._parsePath(id);
         let current = data;
         for (let i = 0; i < parts.length; i++) {
             const part = parts[i];
@@ -128,7 +150,8 @@ export class StorageManager {
         return this._enqueue(async () => {
             if (!id) throw new DatabaseError(this.errors.undefinedID);
             const data = await this._read();
-            return this._find(data, id);
+            const result = this._find(data, id);
+            return result.exists ? result.value : null;
         });
     }
 
@@ -139,13 +162,14 @@ export class StorageManager {
             if (typeof value !== "number") throw new DatabaseError(this.errors.mustBeANumber);
 
             let data = await this._read();
-            const currentVal = this._find(data, id);
+            const result = this._find(data, id);
+            const currentVal = result.value;
 
-            if (currentVal !== null && typeof currentVal !== "number") {
+            if (result.exists && typeof currentVal !== "number") {
                 throw new DatabaseError(this.errors.dataNotANumber);
             }
 
-            const newVal = (currentVal || 0) + value;
+            const newVal = (result.exists ? currentVal : 0) + value;
             this._findAndSet(data, id, newVal);
             await this._write(data);
             return newVal;
@@ -165,7 +189,7 @@ export class StorageManager {
         return this._enqueue(async () => {
             if (!id) throw new DatabaseError(this.errors.undefinedID);
             const data = await this._read();
-            return this._find(data, id) !== null;
+            return this._find(data, id).exists;
         });
     }
 
@@ -174,7 +198,7 @@ export class StorageManager {
             if (!id) throw new DatabaseError(this.errors.undefinedID);
 
             let data = await this._read();
-            const parts = id.split(this.separator);
+            const parts = this._parsePath(id);
             let current = data;
 
             for (let i = 0; i < parts.length; i++) {
@@ -183,9 +207,10 @@ export class StorageManager {
                     return false;
                 }
                 if (i === parts.length - 1) {
-                    if (current[part] === undefined) return false;
+                    if (!Object.prototype.hasOwnProperty.call(current, part)) return false;
                     delete current[part];
                 } else {
+                    if (!Object.prototype.hasOwnProperty.call(current, part)) return false;
                     current = current[part];
                 }
             }
@@ -211,9 +236,10 @@ export class StorageManager {
             if (value === undefined) throw new DatabaseError(this.errors.undefinedValue);
 
             let data = await this._read();
-            let arr = this._find(data, id);
+            const result = this._find(data, id);
+            let arr = result.value;
 
-            if (arr === null || arr === undefined) {
+            if (!result.exists) {
                 arr = [];
             } else if (!Array.isArray(arr)) {
                 throw new DatabaseError(this.errors.mustBeArray);

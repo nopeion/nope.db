@@ -4,16 +4,16 @@
 [![npm version](https://img.shields.io/npm/v/nope.db.svg?style=flat-square)](https://www.npmjs.org/package/nope.db)
 [![npm downloads](https://img.shields.io/npm/dm/nope.db.svg?style=flat-square)](http://npm-stat.com/charts.html?package=nope.db)
 [![install size](https://packagephobia.now.sh/badge?p=nope.db)](https://packagephobia.now.sh/result?p=nope.db)
-[![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/jesuswasmychoice/nope.db/blob/main/LICENSE)
+[![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/nopeion/nope.db/blob/main/LICENSE)
 
-> A modern, simple, and asynchronous JSON database for Node.js. Zero dependencies, dual-module (ESM/CJS) support, and a robust queueing system to prevent data corruption.
+> A modern, simple, and asynchronous JSON database for Node.js. Zero dependencies, dual-module (ESM/CJS) support, and a robust queueing system with atomic file replacement to prevent data corruption.
 
 <hr>
 
 # Features
 
 - **Asynchronous:** All methods are Promise-based (`async/await`).
-- **Data Safe:** Uses an atomic write queue to prevent data corruption from concurrent writes.
+- **Data Safe:** Uses a write queue and atomic file replacement to prevent data corruption from concurrent writes.
 - **Dual Module:** Supports both ES Modules (`import`) and CommonJS (`require`).
 - **Zero Dependencies:** Lightweight and clean.
 - **Nested Data:** Access and manage nested objects with ease using a separator (e.g., `user.settings.theme`).
@@ -116,6 +116,7 @@ Sets or updates an element in the database.
 ### `get(id)`
 Gets an element from the database.
 - **Returns:** `Promise<any>` - The requested data, or `null` if not found.
+- `null` can be stored as a valid value; use `has(id)` to distinguish stored `null` from a missing key.
 
 ---
 
