@@ -6,17 +6,30 @@
 [![install size](https://packagephobia.now.sh/badge?p=nope.db)](https://packagephobia.now.sh/result?p=nope.db)
 [![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/nopeion/nope.db/blob/main/LICENSE)
 
-> A modern, simple, and asynchronous JSON database for Node.js. Zero dependencies, dual-module (ESM/CJS) support, and a robust queueing system with atomic file replacement to prevent data corruption.
+> A modern, simple, and asynchronous JSON database for Node.js. Zero dependencies, dual-module (ESM/CJS) support, and a same-process queueing system with atomic file replacement to reduce data corruption risk.
 
 <hr>
 
 # Features
 
 - **Asynchronous:** All methods are Promise-based (`async/await`).
-- **Data Safe:** Uses a write queue and atomic file replacement to prevent data corruption from concurrent writes.
+- **Data Safe for same-process use:** Uses a file-level write queue and atomic file replacement to protect concurrent writes from one or more `NopeDB` instances in the same Node.js process.
 - **Dual Module:** Supports both ES Modules (`import`) and CommonJS (`require`).
 - **Zero Dependencies:** Lightweight and clean.
 - **Nested Data:** Access and manage nested objects with ease using a separator (e.g., `user.settings.theme`).
+
+<hr>
+
+# Data Safety and Limits
+
+nope.db is designed for small to medium JSON datasets and single-process Node.js apps.
+
+- Operations targeting the same file are serialized inside the current Node.js process.
+- Writes use temporary files and atomic replacement to reduce the chance of partial JSON files.
+- Multi-process writes to the same file are not supported.
+- Every operation reads and writes the full JSON file, so very large files or high-frequency writes will become slower over time.
+
+For large datasets, multi-process workloads, or heavy write traffic, use a server database or an embedded database built for that workload.
 
 <hr>
 

@@ -197,6 +197,20 @@ for (const build of builds) {
             assert.equal((arr as unknown[])[0], 'a');
         });
 
+        await t.test('Concurrent writes across same-process instances', async () => {
+            const firstDb = createDb();
+            const secondDb = createDb();
+            await Promise.all([firstDb.all(), secondDb.all()]);
+
+            await Promise.all(
+                Array.from({ length: 100 }, (_, index) =>
+                    (index % 2 === 0 ? firstDb : secondDb).add('shared_counter', 1)
+                )
+            );
+
+            assert.equal(await firstDb.get('shared_counter'), 100);
+        });
+
         await t.test('add() with non-numeric value', async () => {
             await db.set('non_numeric', 'hello');
             await assert.rejects(async () => db.add('non_numeric', 5), {

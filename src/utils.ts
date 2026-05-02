@@ -18,10 +18,10 @@ interface FindResult {
 }
 
 export class StorageManager {
+    private static queues = new Map<string, Promise<any>>();
     private file: string;
     private spaces: number;
     private separator: string;
-    private queue: Promise<any>;
     private errors = {
         dataNotANumber: "Existing data for this ID is not of type 'number'.",
         mustBeANumber: "The provided value must be of type 'number'.",
@@ -37,7 +37,6 @@ export class StorageManager {
         this.file = settings.file;
         this.spaces = settings.spaces;
         this.separator = settings.separator;
-        this.queue = Promise.resolve();
 
         this._enqueue(async () => {
             try {
@@ -53,8 +52,14 @@ export class StorageManager {
     }
 
     private _enqueue<T>(task: () => Promise<T>): Promise<T> {
-        const nextTask = this.queue.catch(() => { }).then(task);
-        this.queue = nextTask;
+        const currentQueue = StorageManager.queues.get(this.file) ?? Promise.resolve();
+        const nextTask = currentQueue.catch(() => { }).then(task);
+        StorageManager.queues.set(this.file, nextTask);
+        nextTask.finally(() => {
+            if (StorageManager.queues.get(this.file) === nextTask) {
+                StorageManager.queues.delete(this.file);
+            }
+        }).catch(() => { });
         return nextTask;
     }
 
