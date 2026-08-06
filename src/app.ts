@@ -1,6 +1,6 @@
-import { StorageManager, ClearOptions } from "./utils.js";
-import { DatabaseError } from "./error.js";
-import * as pathUtils from "path";
+import * as pathUtils from 'node:path';
+import { DatabaseError } from './error.js';
+import { type ClearOptions, StorageManager } from './utils.js';
 
 export interface NopeDbSettings {
     path?: string;
@@ -31,22 +31,18 @@ export class NopeDB {
         const spaces = settings.spaces ?? 2;
         const separator = settings.separator ?? '.';
 
-        if (typeof path !== 'string')
-            throw new DatabaseError("The 'path' setting must be a string.");
-        if (!path.endsWith(".json"))
-            throw new DatabaseError("The database 'path' must end with '.json'.");
+        if (typeof path !== 'string') throw new DatabaseError("The 'path' setting must be a string.");
+        if (!path.endsWith('.json')) throw new DatabaseError("The database 'path' must end with '.json'.");
         if (typeof spaces !== 'number' || spaces < 0)
             throw new DatabaseError("The 'spaces' setting must be a positive number.");
-        if (typeof separator !== 'string')
-            throw new DatabaseError("The 'separator' setting must be a string.");
-        if (separator.length !== 1)
-            throw new DatabaseError("Invalid 'separator'. Must be a single character.");
+        if (typeof separator !== 'string') throw new DatabaseError("The 'separator' setting must be a string.");
+        if (separator.length !== 1) throw new DatabaseError("Invalid 'separator'. Must be a single character.");
 
         this.settings = {
             path: path,
             spaces: spaces,
             separator: separator,
-            file: pathUtils.resolve(path)
+            file: pathUtils.resolve(path),
         };
 
         this.storage = new StorageManager({
@@ -107,11 +103,54 @@ export class NopeDB {
     }
 
     /**
-     * Pushes an element into an array in the database.
+     * Pushes one or more elements into an array in the database.
      * @returns {Promise<any[]>} The updated array.
      */
-    public push(id: string, value: any): Promise<any[]> {
-        return this.storage.push(id, value);
+    public push(id: string, ...values: any[]): Promise<any[]> {
+        return this.storage.push(id, ...values);
+    }
+
+    /**
+     * Prepends one or more elements to an array in the database.
+     * @returns {Promise<any[]>} The updated array.
+     */
+    public unshift(id: string, ...values: any[]): Promise<any[]> {
+        return this.storage.unshift(id, ...values);
+    }
+
+    /**
+     * Removes all occurrences of a value from an array in the database.
+     * @returns {Promise<any[]>} The updated array.
+     */
+    public pull(id: string, value: any): Promise<any[]> {
+        return this.storage.pull(id, value);
+    }
+
+    /**
+     * Returns the keys of the database, or of the object stored at a given ID.
+     * @param {string} [id] Optional ID to read keys from.
+     * @returns {Promise<string[]>} The keys.
+     */
+    public keys(id?: string): Promise<string[]> {
+        return this.storage.keys(id);
+    }
+
+    /**
+     * Returns the values of the database, or of the object stored at a given ID.
+     * @param {string} [id] Optional ID to read values from.
+     * @returns {Promise<any[]>} The values.
+     */
+    public values(id?: string): Promise<any[]> {
+        return this.storage.values(id);
+    }
+
+    /**
+     * Returns a random key of the database, or of the object stored at a given ID.
+     * @param {string} [id] Optional ID to pick a key from.
+     * @returns {Promise<string | null>} A random key, or null if empty or not an object.
+     */
+    public randomKey(id?: string): Promise<string | null> {
+        return this.storage.randomKey(id);
     }
 
     /**

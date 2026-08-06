@@ -1,6 +1,6 @@
 export class DatabaseError extends Error {
-    constructor(message: string = "Unknown Error") {
+    constructor(message = 'Unknown Error') {
         super(message);
-        this.name = "nopedb";
+        this.name = 'DatabaseError';
     }
 }

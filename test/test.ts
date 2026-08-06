@@ -1,7 +1,7 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 interface NopeDbModule {
@@ -11,24 +11,30 @@ interface NopeDbModule {
         add(id: string, value: number): Promise<number>;
         subtract(id: string, value: number): Promise<number>;
         has(id: string): Promise<boolean>;
-        push(id: string, value: unknown): Promise<unknown[]>;
+        push(id: string, ...values: unknown[]): Promise<unknown[]>;
+        unshift(id: string, ...values: unknown[]): Promise<unknown[]>;
+        pull(id: string, value: unknown): Promise<unknown[]>;
+        keys(id?: string): Promise<string[]>;
+        values(id?: string): Promise<unknown[]>;
+        randomKey(id?: string): Promise<string | null>;
         delete(id: string): Promise<boolean>;
         all(): Promise<Record<string, unknown>>;
         clear(options: { confirm: boolean }): Promise<true>;
         backup(filePath: string): Promise<true>;
         loadBackup(filePath: string): Promise<true>;
     };
+    DatabaseError: new (message?: string) => Error;
 }
 
 const builds: { name: string; loader: () => Promise<NopeDbModule> }[] = [
     {
         name: 'MJS build',
-        loader: () => import(new URL('../dist/mjs/app.js', import.meta.url).href) as Promise<NopeDbModule>,
+        loader: () => import(new URL('../dist/mjs/index.js', import.meta.url).href) as Promise<NopeDbModule>,
     },
     {
         name: 'CJS build',
-        loader: () => import(new URL('../dist/cjs/app.js', import.meta.url).href) as Promise<NopeDbModule>,
-    }
+        loader: () => import(new URL('../dist/cjs/index.js', import.meta.url).href) as Promise<NopeDbModule>,
+    },
 ];
 
 const __filename: string = fileURLToPath(import.meta.url);
@@ -38,10 +44,7 @@ const TEST_DB_PATH: string = path.join(__dirname, 'test-db.json');
 const BACKUP_PATH: string = path.join(__dirname, 'test-db-backup.json');
 
 async function cleanup(): Promise<void> {
-    await Promise.all([
-        fs.rm(TEST_DB_PATH, { force: true }),
-        fs.rm(BACKUP_PATH, { force: true })
-    ]);
+    await Promise.all([fs.rm(TEST_DB_PATH, { force: true }), fs.rm(BACKUP_PATH, { force: true })]);
 }
 
 async function fileExists(filePath: string): Promise<boolean> {
@@ -59,6 +62,7 @@ for (const build of builds) {
 
         const module = await build.loader();
         const NopeDB = module.NopeDB;
+        const DatabaseError = module.DatabaseError;
         let db: ReturnType<typeof createDb>;
 
         function createDb() {
@@ -136,6 +140,60 @@ for (const build of builds) {
             assert.deepEqual(newItems2, ['x']);
         });
 
+        await t.test('push() variadic', async () => {
+            await db.push('items', 'a', 'b', 'c');
+            assert.deepEqual(await db.get('items'), ['a', 'b', 'c']);
+        });
+
+        await t.test('unshift()', async () => {
+            await db.push('items', 'b', 'c');
+            const newItems = await db.unshift('items', 'a');
+            assert.deepEqual(newItems, ['a', 'b', 'c']);
+
+            const newItems2 = await db.unshift('fresh_items', 'x', 'y');
+            assert.deepEqual(newItems2, ['x', 'y']);
+        });
+
+        await t.test('pull()', async () => {
+            await db.push('items', 'a', 'b', 'a', 'c');
+            const newItems = await db.pull('items', 'a');
+            assert.deepEqual(newItems, ['b', 'c']);
+
+            const missing = await db.pull('missing_items', 'x');
+            assert.deepEqual(missing, []);
+            assert.equal(await db.has('missing_items'), false);
+        });
+
+        await t.test('keys() & values()', async () => {
+            await db.set('user_1', { name: 'nopeion', role: 'admin' });
+            const keys = await db.keys('user_1');
+            assert.deepEqual(keys.sort(), ['name', 'role']);
+            const values = await db.values('user_1');
+            assert.deepEqual(values.sort(), ['admin', 'nopeion']);
+
+            assert.deepEqual(await db.keys('missing_key'), []);
+            assert.deepEqual(await db.values('missing_key'), []);
+
+            await db.set('topLevel', 1);
+            const rootKeys = await db.keys();
+            assert.ok(rootKeys.includes('topLevel'));
+        });
+
+        await t.test('randomKey()', async () => {
+            await db.set('key1', 1);
+            await db.set('key2', 2);
+            await db.set('key3', 3);
+
+            const random = await db.randomKey();
+            assert.ok(['key1', 'key2', 'key3'].includes(random as string));
+
+            await db.set('obj', { nested_a: 1, nested_b: 2 });
+            const nestedRandom = await db.randomKey('obj');
+            assert.ok(['nested_a', 'nested_b'].includes(nestedRandom as string));
+
+            assert.equal(await db.randomKey('missing_key'), null);
+        });
+
         await t.test('delete()', async () => {
             await db.set('user_profile_name', 'nopeion');
             const deleted = await db.delete('user_profile_name');
@@ -186,7 +244,7 @@ for (const build of builds) {
                 db.set('concurrent_2', 2),
                 db.add('concurrent_counter', 1),
                 db.push('concurrent_array', 'a'),
-                db.set('concurrent_3', 3)
+                db.set('concurrent_3', 3),
             ]);
 
             assert.equal(await db.get('concurrent_1'), 1);
@@ -204,8 +262,8 @@ for (const build of builds) {
 
             await Promise.all(
                 Array.from({ length: 100 }, (_, index) =>
-                    (index % 2 === 0 ? firstDb : secondDb).add('shared_counter', 1)
-                )
+                    (index % 2 === 0 ? firstDb : secondDb).add('shared_counter', 1),
+                ),
             );
 
             assert.equal(await firstDb.get('shared_counter'), 100);
@@ -214,16 +272,35 @@ for (const build of builds) {
         await t.test('add() with non-numeric value', async () => {
             await db.set('non_numeric', 'hello');
             await assert.rejects(async () => db.add('non_numeric', 5), {
-                name: 'nopedb',
+                name: 'DatabaseError',
             });
             const value = await db.get('non_numeric');
             assert.equal(value, 'hello');
         });
 
+        await t.test('add() rejects NaN and Infinity', async () => {
+            await assert.rejects(async () => db.add('counter', Number.NaN), {
+                name: 'DatabaseError',
+            });
+            await assert.rejects(async () => db.add('counter', Number.POSITIVE_INFINITY), {
+                name: 'DatabaseError',
+            });
+            await assert.rejects(async () => db.subtract('counter', Number.NaN), {
+                name: 'DatabaseError',
+            });
+        });
+
+        await t.test('DatabaseError is exported and instanceof works', async () => {
+            assert.equal(typeof DatabaseError, 'function');
+            const error = new DatabaseError('test');
+            assert.equal(error.name, 'DatabaseError');
+            assert.equal(error.message, 'test');
+        });
+
         await t.test('invalid path segments are rejected consistently', async () => {
             for (const invalidId of ['_bad', 'bad_', 'bad__id', 'safe___bad']) {
-                await assert.rejects(async () => db.get(invalidId), { name: 'nopedb' });
-                await assert.rejects(async () => db.delete(invalidId), { name: 'nopedb' });
+                await assert.rejects(async () => db.get(invalidId), { name: 'DatabaseError' });
+                await assert.rejects(async () => db.delete(invalidId), { name: 'DatabaseError' });
             }
         });
 
@@ -232,9 +309,9 @@ for (const build of builds) {
             await dotDb.all();
 
             for (const unsafeId of ['__proto__.polluted', 'constructor.polluted', 'prototype.polluted']) {
-                await assert.rejects(async () => dotDb.set(unsafeId, true), { name: 'nopedb' });
-                await assert.rejects(async () => dotDb.get(unsafeId), { name: 'nopedb' });
-                await assert.rejects(async () => dotDb.delete(unsafeId), { name: 'nopedb' });
+                await assert.rejects(async () => dotDb.set(unsafeId, true), { name: 'DatabaseError' });
+                await assert.rejects(async () => dotDb.get(unsafeId), { name: 'DatabaseError' });
+                await assert.rejects(async () => dotDb.delete(unsafeId), { name: 'DatabaseError' });
             }
 
             assert.equal(({} as Record<string, unknown>).polluted, undefined);

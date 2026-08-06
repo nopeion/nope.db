@@ -1,6 +1,6 @@
-import fs from "fs/promises";
-import path from "path";
-import { DatabaseError } from "./error.js";
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { DatabaseError } from './error.js';
 
 export interface ClearOptions {
     confirm: boolean;
@@ -24,13 +24,14 @@ export class StorageManager {
     private separator: string;
     private errors = {
         dataNotANumber: "Existing data for this ID is not of type 'number'.",
-        mustBeANumber: "The provided value must be of type 'number'.",
+        mustBeANumber: 'The provided value must be a finite number.',
         mustBeArray: "The existing data must be of type 'array'.",
-        nonValidID: "Invalid ID. It cannot be empty, start/end with a separator, contain repeated separators, or use unsafe path segments.",
-        undefinedID: "ID is undefined.",
-        undefinedValue: "Value is undefined.",
-        parseError: "Failed to parse database file. Check for corrupt JSON.",
-        clearConfirm: "Accidental clear prevented. Must pass { confirm: true } to clear()."
+        nonValidID:
+            'Invalid ID. It cannot be empty, start/end with a separator, contain repeated separators, or use unsafe path segments.',
+        undefinedID: 'ID is undefined.',
+        undefinedValue: 'Value is undefined.',
+        parseError: 'Failed to parse database file. Check for corrupt JSON.',
+        clearConfirm: 'Accidental clear prevented. Must pass { confirm: true } to clear().',
     };
 
     constructor(settings: StorageManagerSettings) {
@@ -53,19 +54,21 @@ export class StorageManager {
 
     private _enqueue<T>(task: () => Promise<T>): Promise<T> {
         const currentQueue = StorageManager.queues.get(this.file) ?? Promise.resolve();
-        const nextTask = currentQueue.catch(() => { }).then(task);
+        const nextTask = currentQueue.catch(() => {}).then(task);
         StorageManager.queues.set(this.file, nextTask);
-        nextTask.finally(() => {
-            if (StorageManager.queues.get(this.file) === nextTask) {
-                StorageManager.queues.delete(this.file);
-            }
-        }).catch(() => { });
+        nextTask
+            .finally(() => {
+                if (StorageManager.queues.get(this.file) === nextTask) {
+                    StorageManager.queues.delete(this.file);
+                }
+            })
+            .catch(() => {});
         return nextTask;
     }
 
     private async _read(): Promise<any> {
         try {
-            const data = await fs.readFile(this.file, "utf-8");
+            const data = await fs.readFile(this.file, 'utf-8');
             return JSON.parse(data);
         } catch (error: any) {
             if (error.code === 'ENOENT') {
@@ -79,25 +82,44 @@ export class StorageManager {
         }
     }
 
-    private async _write(data: any): Promise<void> {
-        const dir = path.dirname(this.file);
-        const base = path.basename(this.file);
+    private async _write(data: any, targetFile: string = this.file): Promise<void> {
+        const dir = path.dirname(targetFile);
+        const base = path.basename(targetFile);
         const suffix = `${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
         const tempFile = path.join(dir, `.${base}.${suffix}.tmp`);
         try {
             await fs.writeFile(tempFile, JSON.stringify(data, null, this.spaces));
-            await fs.rename(tempFile, this.file);
+            await this._rename(tempFile, targetFile);
         } catch (error) {
             await fs.rm(tempFile, { force: true });
             throw error;
         }
     }
 
+    private async _rename(tempFile: string, targetFile: string): Promise<void> {
+        const maxAttempts = 10;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                await fs.rename(tempFile, targetFile);
+                return;
+            } catch (error: any) {
+                const retriable = error?.code === 'EPERM' || error?.code === 'EACCES';
+                if (attempt === maxAttempts || !retriable) {
+                    throw error;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 20 * attempt));
+            }
+        }
+    }
+
     private _parsePath(id: string): string[] {
-        if (typeof id !== 'string' || !id ||
+        if (
+            typeof id !== 'string' ||
+            !id ||
             id.startsWith(this.separator) ||
             id.endsWith(this.separator) ||
-            id.includes(this.separator + this.separator)) {
+            id.includes(this.separator + this.separator)
+        ) {
             throw new DatabaseError(this.errors.nonValidID);
         }
         const parts = id.split(this.separator);
@@ -144,7 +166,7 @@ export class StorageManager {
             if (!id) throw new DatabaseError(this.errors.undefinedID);
             if (value === undefined) throw new DatabaseError(this.errors.undefinedValue);
 
-            let data = await this._read();
+            const data = await this._read();
             this._findAndSet(data, id, value);
             await this._write(data);
             return value;
@@ -164,13 +186,14 @@ export class StorageManager {
         return this._enqueue(async () => {
             if (!id) throw new DatabaseError(this.errors.undefinedID);
             if (value === undefined) throw new DatabaseError(this.errors.undefinedValue);
-            if (typeof value !== "number") throw new DatabaseError(this.errors.mustBeANumber);
+            if (typeof value !== 'number' || !Number.isFinite(value))
+                throw new DatabaseError(this.errors.mustBeANumber);
 
-            let data = await this._read();
+            const data = await this._read();
             const result = this._find(data, id);
             const currentVal = result.value;
 
-            if (result.exists && typeof currentVal !== "number") {
+            if (result.exists && typeof currentVal !== 'number') {
                 throw new DatabaseError(this.errors.dataNotANumber);
             }
 
@@ -182,7 +205,7 @@ export class StorageManager {
     }
 
     public subtract(id: string, value: number): Promise<number> {
-        if (typeof value !== "number") throw new DatabaseError(this.errors.mustBeANumber);
+        if (typeof value !== 'number') throw new DatabaseError(this.errors.mustBeANumber);
         return this.add(id, -value);
     }
 
@@ -202,7 +225,7 @@ export class StorageManager {
         return this._enqueue(async () => {
             if (!id) throw new DatabaseError(this.errors.undefinedID);
 
-            let data = await this._read();
+            const data = await this._read();
             const parts = this._parsePath(id);
             let current = data;
 
@@ -235,12 +258,13 @@ export class StorageManager {
         });
     }
 
-    public push(id: string, value: any): Promise<any[]> {
+    public push(id: string, ...values: any[]): Promise<any[]> {
         return this._enqueue(async () => {
             if (!id) throw new DatabaseError(this.errors.undefinedID);
-            if (value === undefined) throw new DatabaseError(this.errors.undefinedValue);
+            if (values.length === 0 || values.some((value) => value === undefined))
+                throw new DatabaseError(this.errors.undefinedValue);
 
-            let data = await this._read();
+            const data = await this._read();
             const result = this._find(data, id);
             let arr = result.value;
 
@@ -250,23 +274,127 @@ export class StorageManager {
                 throw new DatabaseError(this.errors.mustBeArray);
             }
 
-            arr.push(value);
+            arr.push(...values);
             this._findAndSet(data, id, arr);
             await this._write(data);
             return arr;
         });
     }
 
+    public unshift(id: string, ...values: any[]): Promise<any[]> {
+        return this._enqueue(async () => {
+            if (!id) throw new DatabaseError(this.errors.undefinedID);
+            if (values.length === 0 || values.some((value) => value === undefined))
+                throw new DatabaseError(this.errors.undefinedValue);
+
+            const data = await this._read();
+            const result = this._find(data, id);
+            let arr = result.value;
+
+            if (!result.exists) {
+                arr = [];
+            } else if (!Array.isArray(arr)) {
+                throw new DatabaseError(this.errors.mustBeArray);
+            }
+
+            arr.unshift(...values);
+            this._findAndSet(data, id, arr);
+            await this._write(data);
+            return arr;
+        });
+    }
+
+    public pull(id: string, value: any): Promise<any[]> {
+        return this._enqueue(async () => {
+            if (!id) throw new DatabaseError(this.errors.undefinedID);
+
+            const data = await this._read();
+            const result = this._find(data, id);
+
+            if (!result.exists) {
+                return [];
+            }
+            if (!Array.isArray(result.value)) {
+                throw new DatabaseError(this.errors.mustBeArray);
+            }
+
+            const filtered = result.value.filter((item) => item !== value);
+            if (filtered.length === result.value.length) {
+                return result.value;
+            }
+
+            this._findAndSet(data, id, filtered);
+            await this._write(data);
+            return filtered;
+        });
+    }
+
+    public keys(id?: string): Promise<string[]> {
+        return this._enqueue(async () => {
+            const data = await this._read();
+            let target = data;
+
+            if (id) {
+                const result = this._find(data, id);
+                if (!result.exists) return [];
+                target = result.value;
+            }
+
+            if (typeof target !== 'object' || target === null || Array.isArray(target)) {
+                return [];
+            }
+            return Object.keys(target);
+        });
+    }
+
+    public values(id?: string): Promise<any[]> {
+        return this._enqueue(async () => {
+            const data = await this._read();
+            let target = data;
+
+            if (id) {
+                const result = this._find(data, id);
+                if (!result.exists) return [];
+                target = result.value;
+            }
+
+            if (typeof target !== 'object' || target === null || Array.isArray(target)) {
+                return [];
+            }
+            return Object.values(target);
+        });
+    }
+
+    public randomKey(id?: string): Promise<string | null> {
+        return this._enqueue(async () => {
+            const data = await this._read();
+            let target = data;
+
+            if (id) {
+                const result = this._find(data, id);
+                if (!result.exists) return null;
+                target = result.value;
+            }
+
+            if (typeof target !== 'object' || target === null || Array.isArray(target)) {
+                return null;
+            }
+            const keys = Object.keys(target);
+            if (keys.length === 0) return null;
+            return keys[Math.floor(Math.random() * keys.length)];
+        });
+    }
+
     public backup(filePath: string): Promise<true> {
         return this._enqueue(async (): Promise<true> => {
             if (!filePath || typeof filePath !== 'string') {
-                throw new DatabaseError("Invalid backup file path provided.");
+                throw new DatabaseError('Invalid backup file path provided.');
             }
-            if (!filePath.endsWith(".json")) {
+            if (!filePath.endsWith('.json')) {
                 throw new DatabaseError("The backup file path must end with '.json'.");
             }
             const data = await this._read();
-            await fs.writeFile(filePath, JSON.stringify(data, null, this.spaces));
+            await this._write(data, filePath);
             return true;
         });
     }
@@ -274,12 +402,12 @@ export class StorageManager {
     public loadBackup(filePath: string): Promise<true> {
         return this._enqueue(async (): Promise<true> => {
             if (!filePath || typeof filePath !== 'string') {
-                throw new DatabaseError("Invalid backup file path provided.");
+                throw new DatabaseError('Invalid backup file path provided.');
             }
 
             let backupData: any;
             try {
-                const data = await fs.readFile(filePath, "utf-8");
+                const data = await fs.readFile(filePath, 'utf-8');
                 backupData = JSON.parse(data);
             } catch (error) {
                 throw new DatabaseError(`Failed to read or parse backup file: ${filePath}`);

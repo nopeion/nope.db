@@ -1,34 +1,38 @@
 {
   "name": "nope.db",
   "author": "nopeion",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "license": "MIT",
   "description": "A modern, simple, and async JSON database for Node.js with zero dependencies and a data-safe queue.",
   "type": "module",
-  "main": "./dist/cjs/app.js",
-  "module": "./dist/mjs/app.js",
-  "types": "./dist/mjs/app.d.ts",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/mjs/index.js",
+  "types": "./dist/mjs/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/mjs/app.js",
-      "require": "./dist/cjs/app.js",
-      "types": "./dist/mjs/app.d.ts"
+      "import": "./dist/mjs/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/mjs/index.d.ts"
     }
   },
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "sideEffects": false,
   "scripts": {
     "prepack": "npm run build",
     "build": "npm run build:mjs && npm run build:cjs",
     "build:mjs": "tsc -p tsconfig.json",
     "build:cjs": "tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json', JSON.stringify({ type: 'commonjs' }))\"",
-    "test": "npm run test:all",
-    "test:cjs": "npm run test:all",
-    "test:mjs": "npm run test:all",
-    "test:all": "npm run build && node --loader ts-node/esm --test test/test.ts"
+    "test": "npm run build && node --loader ts-node/esm --test test/test.ts",
+    "lint": "biome check src test",
+    "lint:fix": "biome check --write src test"
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
     "@types/node": "^20.0.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.0.0"

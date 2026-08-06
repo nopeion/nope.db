@@ -153,10 +153,45 @@ Checks if data exists in the database.
 
 ---
 
-### `push(id, value)`
-Pushes an element into an array. If the array doesn't exist, it will be created.
+### `push(id, ...values)`
+Pushes one or more elements into an array. If the array doesn't exist, it will be created.
 - **Returns:** `Promise<any[]>` - The updated array.
 - *Throws:* `DatabaseError` if the existing data is not an array.
+
+---
+
+### `unshift(id, ...values)`
+Prepends one or more elements to an array. If the array doesn't exist, it will be created.
+- **Returns:** `Promise<any[]>` - The updated array.
+- *Throws:* `DatabaseError` if the existing data is not an array.
+
+---
+
+### `pull(id, value)`
+Removes all occurrences of a value from an array.
+- **Returns:** `Promise<any[]>` - The updated array, or `[]` if the ID doesn't exist.
+- *Throws:* `DatabaseError` if the existing data is not an array.
+
+---
+
+### `keys(id?)`
+Returns the keys of the database, or of the object stored at `id`.
+- **`id`** (string, optional): Read keys from this ID instead of the root.
+- **Returns:** `Promise<string[]>` - The keys, or `[]` if not an object.
+
+---
+
+### `values(id?)`
+Returns the values of the database, or of the object stored at `id`.
+- **`id`** (string, optional): Read values from this ID instead of the root.
+- **Returns:** `Promise<any[]>` - The values, or `[]` if not an object.
+
+---
+
+### `randomKey(id?)`
+Returns a random key of the database, or of the object stored at `id`.
+- **`id`** (string, optional): Pick a key from this ID instead of the root.
+- **Returns:** `Promise<string | null>` - A random key, or `null` if empty or not an object.
 
 ---
 
@@ -199,6 +234,25 @@ Loads data from a backup file, overwriting the current database.
 - **`fetch(id)`**: Alias for `get(id)`.
 - **`remove(id)`**: Alias for `delete(id)`.
 - **`reset(options)`**: Alias for `clear(options)`.
+
+---
+
+## Errors
+
+All failed operations throw a `DatabaseError`:
+
+```javascript
+import { NopeDB, DatabaseError } from 'nope.db';
+
+try {
+  await db.set('user', 10);
+  await db.add('user', 5); // throws: existing data is not a number
+} catch (error) {
+  if (error instanceof DatabaseError) {
+    console.log(error.message);
+  }
+}
+```
 
 <hr>
 
